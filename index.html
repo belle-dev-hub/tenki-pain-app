@@ -394,6 +394,48 @@
 
   .pattern-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
   .pattern-row:last-child { border-bottom: none; }
+
+  /* 薬・対処法ボタン */
+  .med-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .med-btn {
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border);
+    background: var(--surface2);
+    color: var(--text2);
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+  .med-btn.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  /* 印刷用レポート */
+  @media print {
+    header, nav, .save-btn, .icon-btn, .section-title, #today-cat-wrap,
+    .nav, .page:not(#page-report) { display: none !important; }
+    #page-report { display: block !important; }
+    body { background: white; }
+    .report-card { box-shadow: none; border: 1px solid #ccc; }
+  }
+  .report-preview {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    margin-bottom: 16px;
+  }
+  .report-header { border-bottom: 2px solid var(--accent); padding-bottom: 12px; margin-bottom: 16px; }
+  .report-title { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .report-sub { font-size: 13px; color: var(--text2); margin-top: 4px; }
+  .report-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  .report-table th { background: var(--surface2); padding: 8px; text-align: left; border: 1px solid var(--border); font-weight: 600; }
+  .report-table td { padding: 8px; border: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -476,7 +518,10 @@
   <!-- 記録ページ -->
   <div id="page-record" class="page">
     <div class="record-card">
-      <div class="record-date" id="record-date-label"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div class="record-date" id="record-date-label" style="margin-bottom:0"></div>
+        <input type="date" id="record-date-picker" style="border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;background:var(--surface2);color:var(--text);outline:none" onchange="onDatePickerChange(this.value)">
+      </div>
       <div class="symptom-row">
         <div class="symptom-name">🤕 頭痛・片頭痛</div>
         <div class="intensity-btns" id="sym-headache">
@@ -523,6 +568,30 @@
         </div>
       </div>
       <div class="symptom-row">
+        <div class="symptom-name">💊 薬・対処法</div>
+        <div class="med-btns" id="med-btns">
+          <button class="med-btn" onclick="toggleMed('ロキソニン', this)">ロキソニン</button>
+          <button class="med-btn" onclick="toggleMed('イブ', this)">イブ</button>
+          <button class="med-btn" onclick="toggleMed('バファリン', this)">バファリン</button>
+          <button class="med-btn" onclick="toggleMed('トリプタン系', this)">トリプタン系</button>
+          <button class="med-btn" onclick="toggleMed('漢方', this)">漢方</button>
+          <button class="med-btn" onclick="toggleMed('休憩', this)">休憩</button>
+          <button class="med-btn" onclick="toggleMed('温める', this)">温める</button>
+          <button class="med-btn" onclick="toggleMed('冷やす', this)">冷やす</button>
+          <button class="med-btn" onclick="toggleMed('ストレッチ', this)">ストレッチ</button>
+          <button class="med-btn" onclick="toggleMed('水分補給', this)">水分補給</button>
+        </div>
+      </div>
+      <div class="symptom-row">
+        <div class="symptom-name">✅ 対処の効果</div>
+        <div class="intensity-btns" id="med-effect">
+          <button class="intensity-btn" onclick="selectEffect(0,this)">未使用</button>
+          <button class="intensity-btn" onclick="selectEffect(1,this)">効いた</button>
+          <button class="intensity-btn" onclick="selectEffect(2,this)">少し効いた</button>
+          <button class="intensity-btn" onclick="selectEffect(3,this)">効かなかった</button>
+        </div>
+      </div>
+      <div class="symptom-row">
         <div class="symptom-name">📝 メモ</div>
         <textarea class="note-area" id="record-note" placeholder="気になったことを自由に..."></textarea>
       </div>
@@ -540,6 +609,7 @@
   <div id="page-analysis" class="page">
     <div class="section-title">📊 あなたのパターン</div>
     <div id="analysis-content"></div>
+    <button class="save-btn" onclick="printReport()" style="margin-top:8px;background:var(--ok)">🖨 お医者さん用レポートを印刷・保存</button>
   </div>
 
   <!-- 設定ページ -->
@@ -626,6 +696,11 @@
       🌐 天気データは気象庁のオープンデータ（Open-Meteo API）から取得します。<br>
       APIキーは不要です。
     </div>
+    <div style="margin-top: 12px;">
+      <button onclick="resetAllData()" style="width:100%;padding:12px;background:#fff;border:1.5px solid #e07b5a;border-radius:12px;color:#e07b5a;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">
+        🗑 すべての記録を削除する
+      </button>
+    </div>
   </div>
 
 </main>
@@ -641,8 +716,9 @@ const DB = {
 
 // ===== 状態 =====
 let symptoms = { headache: 0, dizziness: 0, shoulder: 0, joint: 0, fatigue: 0 };
+let selectedMeds = new Set();
+let medEffect = 0;
 let weatherData = null;
-let pressureHistory = [];
 
 // ===== ページ切替 =====
 function showPage(name, btn) {
@@ -672,6 +748,8 @@ function saveCitySettings() {
 }
 function saveThreshold() {
   DB.set('threshold', parseFloat(document.getElementById('threshold-input').value));
+  // 今日ページが表示中なら再描画
+  if (weatherData) renderToday(weatherData);
 }
 
 // ===== 天気データ取得（Open-Meteo） =====
@@ -730,9 +808,10 @@ function renderToday(data) {
     now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日（' +
     ['日','月','火','水','木','金','土'][now.getDay()] + '）';
 
-  // 現在の時刻インデックス
+  // 現在の時刻インデックス（日本時間で検索）
   const times = data.hourly.time;
-  const nowStr = now.toISOString().slice(0,13);
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const nowStr = jstNow.toISOString().slice(0,13);
   let idx = times.findIndex(t => t.startsWith(nowStr));
   if (idx < 0) idx = 0;
 
@@ -922,9 +1001,31 @@ function selectSym(name, val, btn) {
   });
 }
 
+function toggleMed(name, btn) {
+  if (selectedMeds.has(name)) {
+    selectedMeds.delete(name);
+    btn.classList.remove('selected');
+  } else {
+    selectedMeds.add(name);
+    btn.classList.add('selected');
+  }
+}
+
+function selectEffect(val, btn) {
+  medEffect = val;
+  document.querySelectorAll('#med-effect .intensity-btn').forEach((b, i) => {
+    b.className = 'intensity-btn' + (i === val ? ' sel-' + Math.min(val, 3) : '');
+  });
+}
+
+function toJSTDateKey(date) {
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
+}
+
 function saveRecord() {
   const now = new Date();
-  const dateKey = now.toISOString().slice(0,10);
+  const dateKey = recordingDate || toJSTDateKey(now);
   const pressure = weatherData
     ? Math.round(weatherData.hourly.surface_pressure[
         weatherData.hourly.time.findIndex(t => t.startsWith(now.toISOString().slice(0,13))) ?? 0
@@ -948,6 +1049,8 @@ function saveRecord() {
     note: document.getElementById('record-note').value,
     pressure,
     pressureChange,
+    meds: [...selectedMeds],
+    medEffect,
     weatherCode: weatherData?.current_weather?.weathercode ?? null
   };
 
@@ -955,29 +1058,76 @@ function saveRecord() {
   const existIdx = records.findIndex(r => r.date === dateKey);
   if (existIdx >= 0) records[existIdx] = record;
   else records.unshift(record);
+  // 日付の新しい順にソート
+  records.sort((a, b) => b.date.localeCompare(a.date));
   DB.set('records', records);
 
   showToast('✅ 記録を保存しました');
 }
 
-function initRecordPage() {
+let recordingDate = null; // 現在記録中の日付（YYYY-MM-DD）
+
+function initRecordPage(dateKey) {
   const now = new Date();
+  if (!dateKey) dateKey = toJSTDateKey(now);
+  recordingDate = dateKey;
+
+  // ピッカーの値をセット
+  const picker = document.getElementById('record-date-picker');
+  picker.value = dateKey;
+  picker.max = toJSTDateKey(now); // 未来は選べない
+
+  const d = new Date(dateKey + 'T12:00:00+09:00');
+  const days = ['日','月','火','水','木','金','土'];
+  const isToday = dateKey === toJSTDateKey(now);
   document.getElementById('record-date-label').textContent =
-    now.getFullYear() + '年' + (now.getMonth()+1) + '月' + now.getDate() + '日の記録';
-  // 今日すでに記録があれば読み込む
-  const dateKey = now.toISOString().slice(0,10);
+    `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${days[d.getDay()]}）${isToday ? ' 今日' : ''}の記録`;
+
+  // フォームリセット
+  symptoms = { headache:0, dizziness:0, shoulder:0, joint:0, fatigue:0 };
+  selectedMeds = new Set();
+  medEffect = 0;
+  document.getElementById('record-note').value = '';
+  document.querySelectorAll('.med-btn').forEach(b => b.classList.remove('selected'));
+  document.querySelectorAll('#med-effect .intensity-btn').forEach((b,i) => {
+    b.className = 'intensity-btn' + (i === 0 ? ' sel-0' : '');
+  });
+  Object.keys(symptoms).forEach(k => {
+    document.getElementById('sym-' + k)?.querySelectorAll('.intensity-btn').forEach((b,i) => {
+      b.className = 'intensity-btn' + (i === 0 ? ' sel-0' : '');
+    });
+  });
+
+  // 既存記録があれば読み込む
   const records = DB.get('records', []);
-  const today = records.find(r => r.date === dateKey);
-  if (today) {
-    symptoms = { ...today.symptoms };
-    document.getElementById('record-note').value = today.note || '';
+  const existing = records.find(r => r.date === dateKey);
+  if (existing) {
+    symptoms = { ...existing.symptoms };
+    document.getElementById('record-note').value = existing.note || '';
     Object.entries(symptoms).forEach(([k,v]) => {
-      const group = document.getElementById('sym-' + k);
-      group.querySelectorAll('.intensity-btn').forEach((b, i) => {
+      document.getElementById('sym-' + k)?.querySelectorAll('.intensity-btn').forEach((b,i) => {
         b.className = 'intensity-btn' + (i === v ? ' sel-' + v : '');
       });
     });
+    if (existing.meds) {
+      existing.meds.forEach(med => {
+        selectedMeds.add(med);
+        document.querySelectorAll('.med-btn').forEach(b => {
+          if (b.textContent === med) b.classList.add('selected');
+        });
+      });
+    }
+    if (existing.medEffect !== undefined) {
+      medEffect = existing.medEffect;
+      document.querySelectorAll('#med-effect .intensity-btn').forEach((b,i) => {
+        b.className = 'intensity-btn' + (i === medEffect ? ' sel-' + Math.min(medEffect,3) : '');
+      });
+    }
   }
+}
+
+function onDatePickerChange(val) {
+  if (val) initRecordPage(val);
 }
 
 // ===== 履歴 =====
@@ -991,21 +1141,26 @@ function renderLog() {
   }
   const days = ['日','月','火','水','木','金','土'];
   list.innerHTML = records.slice(0,30).map(r => {
-    const d = new Date(r.date);
+    const d = new Date(r.date + 'T12:00:00+09:00');
     const syms = Object.entries(r.symptoms)
       .filter(([,v]) => v > 0)
       .map(([k,v]) => `<span class="symptom-tag st-${v}">${symNames[k]}${['','(軽)','(中)','(強)'][v]}</span>`)
       .join('');
     const pressureText = r.pressure ? `気圧: ${r.pressure} hPa` : '';
+    const medText = r.meds && r.meds.length > 0
+      ? `<div style="margin-top:5px;font-size:12px;color:var(--text2)">💊 ${r.meds.join('・')} ${ r.medEffect ? ['','→効いた✅','→少し効いた🔶','→効かなかった❌'][r.medEffect] || '' : ''}</div>`
+      : '';
     return `<div class="log-item">
-      <div class="log-date-col">
+      <div class="log-date-col" onclick="editRecord('${r.date}')" style="cursor:pointer">
         <div class="log-month">${d.getMonth()+1}月</div>
         <div class="log-day">${d.getDate()}</div>
         <div class="log-dow">${days[d.getDay()]}</div>
+        <div style="font-size:10px;color:var(--accent);margin-top:3px">編集</div>
       </div>
       <div class="log-body">
         <div class="log-pressure">${pressureText} ${r.weatherCode !== null ? weatherCodeToEmoji(r.weatherCode) : ''}</div>
         <div class="log-symptoms">${syms || '<span style="color:var(--text2);font-size:13px">症状なし</span>'}</div>
+        ${medText}
         ${r.note ? `<div style="margin-top:6px;font-size:12px;color:var(--text2)">${r.note}</div>` : ''}
       </div>
     </div>`;
@@ -1044,6 +1199,19 @@ async function renderAnalysis() {
     }
   });
 
+  // 薬効果集計
+  const medEffectMap = {};
+  records.forEach(r => {
+    if (!r.meds || r.meds.length === 0) return;
+    r.meds.forEach(med => {
+      if (!medEffectMap[med]) medEffectMap[med] = {効いた:0, 少し:0, 効かない:0};
+      if (r.medEffect === 1) medEffectMap[med]['効いた']++;
+      else if (r.medEffect === 2) medEffectMap[med]['少し']++;
+      else if (r.medEffect === 3) medEffectMap[med]['効かない']++;
+    });
+  });
+  const bestMed = Object.entries(medEffectMap).sort((a,b)=>b[1]['効いた']-a[1]['効いた'])[0];
+
   const mostFreq = Object.entries(symCounts).sort((a,b)=>b[1]-a[1])[0];
   const avgPressure = pressureOnSym.length ? Math.round(pressureOnSym.reduce((a,b)=>a+b,0)/pressureOnSym.length) : null;
 
@@ -1070,6 +1238,7 @@ async function renderAnalysis() {
       ${avgPressure ? `<div class="pattern-row"><span>症状発生時の平均気圧</span><strong>${avgPressure} hPa</strong></div>` : ''}
       <div class="pattern-row"><span>現在の閾値設定</span><strong>${currentThreshold} hPa/3h</strong></div>
       ${suggestedThreshold ? `<div class="pattern-row"><span>推奨閾値</span><strong style="color:var(--accent)">${suggestedThreshold} hPa/3h</strong></div>` : ''}
+      ${bestMed ? `<div class="pattern-row"><span>最も効いた対処法</span><strong style="color:var(--ok)">💊 ${bestMed[0]}（${bestMed[1]['効いた']}回効果あり）</strong></div>` : ''}
     </div>
     <div class="analysis-card">
       <div class="card-title">症状の出やすさ</div>
@@ -1104,7 +1273,9 @@ async function renderAnalysis() {
 症状内訳: ${Object.entries(symCounts).map(([k,v])=>`${symNames[k]}${v}日`).join('、')}
 ${avgPressure ? `症状発生時の平均気圧: ${avgPressure} hPa` : ''}
 現在の閾値設定: ${currentThreshold} hPa/3h
-${suggestedThreshold ? `推奨閾値: ${suggestedThreshold} hPa/3h（${suggestedThreshold < currentThreshold ? '現在より敏感に設定すべき' : suggestedThreshold > currentThreshold ? '現在より鈍感に設定すべき' : 'ちょうど良い'}）` : ''}
+${suggestedThreshold ? `推奨閾値: ${suggestedThreshold} hPa/3h` : ''}
+${bestMed ? `最も効果があった対処法: ${bestMed[0]}（効いた${bestMed[1]['効いた']}回）` : ''}
+${Object.keys(medEffectMap).length > 0 ? `対処法の記録: ${Object.entries(medEffectMap).map(([m,d])=>`${m}(効${d['効いた']}回・少${d['少し']}回・否${d['効かない']}回)`).join('、')}` : ''}
 記録から読み取れること: ${records.slice(0,5).map(r=>`${r.date} 気圧${r.pressure??'不明'}hPa 症状${Object.entries(r.symptoms).filter(([,v])=>v>0).map(([k,v])=>symNames[k]+v+'強').join('・')}`).join(' / ')}
     `.trim();
 
@@ -1145,7 +1316,103 @@ ${summary}
   }
 }
 
-// ===== ユーティリティ =====
+// ===== お医者さん用レポート印刷 =====
+function printReport() {
+  const records = DB.get('records', []);
+  if (records.length === 0) { showToast('記録がありません'); return; }
+  const city = DB.get('city', '').split('|')[3] ?? '';
+  const days = ['日','月','火','水','木','金','土'];
+
+  // 薬効果集計
+  const medEffectMap = {};
+  records.forEach(r => {
+    if (!r.meds || r.meds.length === 0) return;
+    r.meds.forEach(med => {
+      if (!medEffectMap[med]) medEffectMap[med] = {効いた:0, 少し効いた:0, 効かなかった:0, 合計:0};
+      medEffectMap[med].合計++;
+      if (r.medEffect === 1) medEffectMap[med]['効いた']++;
+      else if (r.medEffect === 2) medEffectMap[med]['少し効いた']++;
+      else if (r.medEffect === 3) medEffectMap[med]['効かなかった']++;
+    });
+  });
+
+  const symNames2 = { headache:'頭痛・片頭痛', dizziness:'めまい・耳鳴り', shoulder:'肩こり', joint:'関節痛', fatigue:'だるさ' };
+  const symCounts = { headache:0, dizziness:0, shoulder:0, joint:0, fatigue:0 };
+  records.forEach(r => Object.entries(r.symptoms).forEach(([k,v]) => { if(v>0) symCounts[k]++; }));
+
+  const reportHTML = `
+    <html><head><meta charset="UTF-8">
+    <style>
+      body { font-family: 'Hiragino Sans', sans-serif; font-size: 13px; color: #333; padding: 20px; max-width: 700px; margin: 0 auto; }
+      h1 { font-size: 18px; border-bottom: 2px solid #5b8fbc; padding-bottom: 8px; color: #5b8fbc; }
+      h2 { font-size: 14px; margin-top: 20px; margin-bottom: 6px; color: #3a4a5c; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th { background: #e8eff7; padding: 7px; text-align: left; border: 1px solid #d0dce8; font-size: 12px; }
+      td { padding: 7px; border: 1px solid #d0dce8; font-size: 12px; }
+      .note { font-size: 11px; color: #888; margin-top: 4px; }
+      .footer { margin-top: 30px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 10px; }
+    </style></head><body>
+    <h1>🌡 天気痛・気象病 症状記録レポート</h1>
+    <p>記録期間：${records[records.length-1]?.date} 〜 ${records[0]?.date}（${records.length}日間）　地域：${city}</p>
+    <p class="note">※このレポートは「天気痛ノート」アプリで記録した症状をまとめたものです</p>
+
+    <h2>■ 症状の頻度</h2>
+    <table>
+      <tr><th>症状</th><th>発生日数</th><th>全体の割合</th></tr>
+      ${Object.entries(symCounts).map(([k,v]) =>
+        `<tr><td>${symNames2[k]}</td><td>${v}日</td><td>${Math.round(v/records.length*100)}%</td></tr>`
+      ).join('')}
+    </table>
+
+    ${Object.keys(medEffectMap).length > 0 ? `
+    <h2>■ 薬・対処法の効果</h2>
+    <table>
+      <tr><th>薬・対処法</th><th>使用回数</th><th>効いた</th><th>少し効いた</th><th>効かなかった</th></tr>
+      ${Object.entries(medEffectMap).map(([med, d]) =>
+        `<tr><td>${med}</td><td>${d.合計}回</td><td>${d['効いた']}回</td><td>${d['少し効いた']}回</td><td>${d['効かなかった']}回</td></tr>`
+      ).join('')}
+    </table>` : ''}
+
+    <h2>■ 直近30日の記録詳細</h2>
+    <table>
+      <tr><th>日付</th><th>気圧(hPa)</th><th>気圧変化</th><th>主な症状</th><th>薬・対処</th><th>効果</th><th>メモ</th></tr>
+      ${records.slice(0,30).map(r => {
+        const d = new Date(r.date);
+        const syms = Object.entries(r.symptoms).filter(([,v])=>v>0).map(([k,v])=>symNames2[k]).join('、') || 'なし';
+        const change = r.pressureChange !== null && r.pressureChange !== undefined ? (r.pressureChange >= 0 ? '+' : '') + r.pressureChange : '-';
+        const meds = r.meds && r.meds.length > 0 ? r.meds.join('・') : '-';
+        const effect = r.medEffect ? ['','効いた','少し効いた','効かなかった'][r.medEffect] || '-' : '-';
+        return `<tr><td>${r.date}（${days[d.getDay()]}）</td><td>${r.pressure ?? '-'}</td><td>${change}</td><td>${syms}</td><td>${meds}</td><td>${effect}</td><td>${r.note || ''}</td></tr>`;
+      }).join('')}
+    </table>
+
+    <div class="footer">天気痛ノート / 出力日：${new Date().toLocaleDateString('ja-JP')}</div>
+    </body></html>
+  `;
+
+  const w = window.open('', '_blank');
+  w.document.write(reportHTML);
+  w.document.close();
+  setTimeout(() => w.print(), 500);
+}
+
+
+function resetAllData() {
+  if (confirm('すべての記録を削除しますか？\nこの操作は元に戻せません。')) {
+    DB.set('records', []);
+    showToast('🗑 記録を削除しました');
+  }
+}
+
+function editRecord(dateKey) {
+  // 記録タブに移動してその日付をセット
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-record').classList.add('active');
+  document.querySelectorAll('.nav-btn')[1].classList.add('active');
+  initRecordPage(dateKey);
+}
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -1158,14 +1425,15 @@ function showToast(msg) {
   loadSettings();
   initRecordPage();
   refreshWeather();
+
   // 記録ページへの切替時にも初期化
   document.querySelectorAll('.nav-btn').forEach((btn, i) => {
     const pages = ['today','record','log','analysis','settings'];
-    const orig = btn.onclick;
     btn.addEventListener('click', () => {
       if(pages[i] === 'record') initRecordPage();
     });
   });
+
 })();
 </script>
 </body>
