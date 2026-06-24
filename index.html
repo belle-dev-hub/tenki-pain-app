@@ -931,12 +931,23 @@ function saveRecord() {
       ])
     : null;
 
+  // 3時間前との気圧変化も記録
+  let pressureChange = null;
+  if (weatherData) {
+    const idx = weatherData.hourly.time.findIndex(t => t.startsWith(now.toISOString().slice(0,13)));
+    if (idx >= 3) {
+      pressureChange = weatherData.hourly.surface_pressure[idx] - weatherData.hourly.surface_pressure[idx-3];
+      pressureChange = Math.round(pressureChange * 10) / 10;
+    }
+  }
+
   const record = {
     date: dateKey,
     timestamp: now.toISOString(),
     symptoms: { ...symptoms },
     note: document.getElementById('record-note').value,
     pressure,
+    pressureChange,
     weatherCode: weatherData?.current_weather?.weathercode ?? null
   };
 
@@ -1017,16 +1028,39 @@ async function renderAnalysis() {
 
   // 基本集計
   const totalDays = records.length;
+  const currentThreshold = DB.get('threshold', 3);
   const symCounts = { headache:0, dizziness:0, shoulder:0, joint:0, fatigue:0 };
   const pressureOnSym = [];
+  // 閾値分析：症状ありの日の気圧変化を収集
+  const changesWithSym = [];   // 症状あり日の気圧変化量
+  const changesNoSym = [];     // 症状なし日の気圧変化量
   records.forEach(r => {
     let hasSym = false;
     Object.entries(r.symptoms).forEach(([k,v]) => { if(v > 0) { symCounts[k]++; hasSym = true; } });
     if (hasSym && r.pressure) pressureOnSym.push(r.pressure);
+    if (r.pressureChange !== undefined) {
+      if (hasSym) changesWithSym.push(Math.abs(r.pressureChange));
+      else changesNoSym.push(Math.abs(r.pressureChange));
+    }
   });
 
   const mostFreq = Object.entries(symCounts).sort((a,b)=>b[1]-a[1])[0];
   const avgPressure = pressureOnSym.length ? Math.round(pressureOnSym.reduce((a,b)=>a+b,0)/pressureOnSym.length) : null;
+
+  // 閾値推奨値を計算
+  let suggestedThreshold = null;
+  let thresholdNote = '';
+  if (changesWithSym.length >= 3) {
+    const avgChange = changesWithSym.reduce((a,b)=>a+b,0) / changesWithSym.length;
+    suggestedThreshold = Math.max(1, Math.round(avgChange * 10) / 10);
+    if (Math.abs(suggestedThreshold - currentThreshold) >= 1) {
+      thresholdNote = suggestedThreshold < currentThreshold
+        ? `あなたは${suggestedThreshold} hPa程度の変化でも症状が出やすいみたいにゃ。閾値を${suggestedThreshold}に下げてみるといいにゃ！`
+        : `あなたは${suggestedThreshold} hPa以上の変化で症状が出る傾向にゃ。閾値を${suggestedThreshold}に上げると精度が上がるかもにゃ。`;
+    } else {
+      thresholdNote = `今の閾値（${currentThreshold} hPa）はあなたにちょうど合ってるにゃ😸`;
+    }
+  }
 
   cont.innerHTML = `
     <div class="analysis-card">
@@ -1034,6 +1068,8 @@ async function renderAnalysis() {
       <div class="pattern-row"><span>記録日数</span><strong>${totalDays}日間</strong></div>
       <div class="pattern-row"><span>最も多い症状</span><strong>${symNames[mostFreq[0]]}（${mostFreq[1]}日）</strong></div>
       ${avgPressure ? `<div class="pattern-row"><span>症状発生時の平均気圧</span><strong>${avgPressure} hPa</strong></div>` : ''}
+      <div class="pattern-row"><span>現在の閾値設定</span><strong>${currentThreshold} hPa/3h</strong></div>
+      ${suggestedThreshold ? `<div class="pattern-row"><span>推奨閾値</span><strong style="color:var(--accent)">${suggestedThreshold} hPa/3h</strong></div>` : ''}
     </div>
     <div class="analysis-card">
       <div class="card-title">症状の出やすさ</div>
@@ -1067,6 +1103,8 @@ async function renderAnalysis() {
 最も多い症状: ${symNames[mostFreq[0]]}（${mostFreq[1]}日）
 症状内訳: ${Object.entries(symCounts).map(([k,v])=>`${symNames[k]}${v}日`).join('、')}
 ${avgPressure ? `症状発生時の平均気圧: ${avgPressure} hPa` : ''}
+現在の閾値設定: ${currentThreshold} hPa/3h
+${suggestedThreshold ? `推奨閾値: ${suggestedThreshold} hPa/3h（${suggestedThreshold < currentThreshold ? '現在より敏感に設定すべき' : suggestedThreshold > currentThreshold ? '現在より鈍感に設定すべき' : 'ちょうど良い'}）` : ''}
 記録から読み取れること: ${records.slice(0,5).map(r=>`${r.date} 気圧${r.pressure??'不明'}hPa 症状${Object.entries(r.symptoms).filter(([,v])=>v>0).map(([k,v])=>symNames[k]+v+'強').join('・')}`).join(' / ')}
     `.trim();
 
@@ -1080,7 +1118,9 @@ ${avgPressure ? `症状発生時の平均気圧: ${avgPressure} hPa` : ''}
           role: 'user',
           content: `あなたは「てんきねこ」という天気痛に詳しい猫キャラクターです。
 語尾は必ず「にゃ」「にゃ〜」「にゃ！」のどれかで終わること。
-猫っぽい優しい口調で、記録データをもとに気遣いとアドバイスを3〜4文で伝えてください。
+猫っぽい優しい口調で、以下を含めて3〜5文で伝えてください：
+1. 記録データへの気遣いと全体的なアドバイス
+2. 推奨閾値がある場合は「設定の閾値を◯にするといいにゃ」と具体的に教える
 難しい言葉は使わないこと。絵文字を1〜2個使っても良いです。
 
 記録データ：
