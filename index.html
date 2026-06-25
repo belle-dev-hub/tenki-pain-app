@@ -313,6 +313,7 @@
     position: relative;
     flex: 1;
     box-shadow: 0 2px 8px rgba(91,143,188,0.08);
+    white-space: pre-line;
   }
   .cat-name {
     font-size: 11px;
@@ -734,9 +735,12 @@ function showPage(name, btn) {
 function loadSettings() {
   const city = DB.get('city', '360010|34.07|134.56|徳島市');
   const [code, lat, lon, name] = city.split('|');
-  document.getElementById('city-select').value = city;
-  document.getElementById('city-display').textContent = name;
-  document.getElementById('threshold-input').value = DB.get('threshold', 3);
+  const citySelect = document.getElementById('city-select');
+  const thresholdInput = document.getElementById('threshold-input');
+  if (citySelect) citySelect.value = city;
+  if (thresholdInput) thresholdInput.value = DB.get('threshold', 3);
+  const cityDisplay = document.getElementById('city-display');
+  if (cityDisplay) cityDisplay.textContent = name;
   return { code, lat: parseFloat(lat), lon: parseFloat(lon), name };
 }
 function saveCitySettings() {
@@ -773,8 +777,11 @@ function weatherCodeToEmoji(code) {
 }
 
 function calcRisk(pressureChanges, threshold) {
+  if (!pressureChanges || pressureChanges.length === 0) {
+    return { level: 'low', text: '✅ リスク低：体調は安定しやすいです', detail: '気圧変化が少なく、天気痛が出にくいコンディションです。', score: 0 };
+  }
   const maxChange = Math.max(...pressureChanges.map(Math.abs));
-  const score = Math.min(100, (maxChange / threshold) * 50);
+  const score = Math.min(100, (maxChange / Math.max(threshold, 0.1)) * 50);
   let level, text, detail;
   if (score < 30) {
     level = 'low'; text = '✅ リスク低：体調は安定しやすいです';
@@ -861,9 +868,10 @@ function renderToday(data) {
 
 function renderPressureChart(vals) {
   const svg = document.getElementById('pressure-svg');
-  if (!vals || vals.length === 0) return;
+  if (!vals || vals.length < 2) return;
   const min = Math.min(...vals) - 2;
   const max = Math.max(...vals) + 2;
+  if (max === min) return; // 全て同値の場合はスキップ
   const w = 300, h = 80;
   const pts = vals.map((v, i) => {
     const x = (i / (vals.length - 1)) * w;
@@ -940,56 +948,43 @@ function renderDemoToday() {
 // ===== 猫アドバイザー =====
 const CAT_FACES = { low: '😸', mid: '😿', high: '🙀' };
 
-// リスクと気圧変化から猫のセリフ（Claude APIまたはフォールバック）
-async function fetchCatComment(riskLevel, pressure, change3h) {
+function fetchCatComment(riskLevel, pressure, change3h) {
   const wrap = document.getElementById('today-cat-wrap');
   const faceEl = document.getElementById('today-cat-face');
   const textEl = document.getElementById('today-cat-text');
   wrap.style.display = 'flex';
   faceEl.textContent = CAT_FACES[riskLevel] ?? '🐱';
-  textEl.innerHTML = '<span class="cat-loading"><span class="dot-anim">考え中にゃ</span></span>';
 
-  const fallbacks = {
-    low: ['気圧は安定してるにゃ〜☀️ 今日は動きやすい日にゃ！','お天気落ち着いてるにゃ。無理せずのんびり過ごすといいにゃ🐾'],
-    mid: ['少し気圧が変わってるにゃ…💨 水分補給と休憩を忘れずにゃ。','なんか変な感じがしたらすぐ休むにゃ！無理は禁物にゃ🌧'],
-    high: ['気圧が大きく変わってるにゃ！😿 今日は無理しちゃダメにゃ…','頭が痛くなる前に早めに薬を飲んでほしいにゃ…🙀 ゆっくり休んでにゃ']
+  const changeAbs = Math.abs(change3h);
+  const isRising = change3h > 0;
+  const isFalling = change3h < 0;
+
+  const msgs = {
+    low: [
+      '気圧は安定してるにゃ〜☀️ 今日は動きやすい日にゃ！',
+      'お天気落ち着いてるにゃ。無理せずのんびり過ごすといいにゃ🐾',
+      '今日は気圧が安定してていいにゃ！外に出るなら今日がチャンスにゃ😸',
+      '体調が整いやすい日にゃ〜。積極的に動いても大丈夫にゃ！',
+      '気圧の変化が少ないにゃ。ゆっくり深呼吸して過ごしてにゃ🐾',
+    ],
+    mid: [
+      '少し気圧が変わってるにゃ…💨 水分補給と休憩を忘れずにゃ。',
+      'なんか変な感じがしたらすぐ休むにゃ！無理は禁物にゃ🌧',
+      `気圧が${isFalling ? '下がって' : '上がって'}きてるにゃ。頭が重くなったら早めに対処するにゃ。`,
+      '体がだるくなるかもしれないにゃ。今日は無理しすぎないでほしいにゃ🐾',
+      '気圧の変化が出てるにゃ〜。痛み止めをそばに置いておくといいにゃ。',
+    ],
+    high: [
+      '気圧が大きく変わってるにゃ！😿 今日は無理しちゃダメにゃ…',
+      '頭が痛くなる前に早めに薬を飲んでほしいにゃ…🙀 ゆっくり休んでにゃ',
+      `気圧が${changeAbs.toFixed(1)} hPaも${isFalling ? '下がって' : '上がって'}るにゃ！これは要注意にゃ😿`,
+      '今日は天気痛が出やすいにゃ…。無理な予定はキャンセルしていいにゃ🙀',
+      '気圧変化が大きいにゃ。早めに休んで、薬も準備しておくにゃ！',
+    ]
   };
 
-  try {
-    const changeText = change3h >= 0 ? `+${change3h.toFixed(1)}` : change3h.toFixed(1);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: `あなたは「てんきねこ」という天気痛に詳しい猫キャラクターです。
-語尾は必ず「にゃ」「にゃ〜」「にゃ！」のどれかで終わること。
-猫っぽい優しい口調で、天気痛への気遣いと今日のアドバイスを2〜3文で伝えてください。
-難しい言葉は使わないこと。
-
-現在の状況：
-- 気圧: ${pressure} hPa
-- 3時間の変化: ${changeText} hPa
-- リスクレベル: ${riskLevel === 'high' ? '高（要注意）' : riskLevel === 'mid' ? '中（やや注意）' : '低（安定）'}
-
-猫のセリフだけを返してください（前置きや説明は不要）。`
-        }]
-      })
-    });
-    const aiData = await res.json();
-    const text = aiData.content?.[0]?.text?.trim();
-    if (text) {
-      textEl.textContent = text;
-      return;
-    }
-  } catch(e) { /* fallthrough */ }
-
-  // フォールバック
-  const msgs = fallbacks[riskLevel] ?? fallbacks.low;
-  textEl.textContent = msgs[Math.floor(Math.random() * msgs.length)];
+  const list = msgs[riskLevel] ?? msgs.low;
+  textEl.textContent = list[Math.floor(Math.random() * list.length)];
 }
 
 
@@ -1026,22 +1021,55 @@ function toJSTDateKey(date) {
 function saveRecord() {
   const now = new Date();
   const dateKey = recordingDate || toJSTDateKey(now);
-  const pressure = weatherData
-    ? Math.round(weatherData.hourly.surface_pressure[
-        weatherData.hourly.time.findIndex(t => t.startsWith(now.toISOString().slice(0,13))) ?? 0
-      ])
-    : null;
+  const isToday = dateKey === toJSTDateKey(now);
 
-  // 3時間前との気圧変化も記録
+  // 気圧取得（日本時間ベースでインデックス検索）
+  let pressure = null;
   let pressureChange = null;
-  if (weatherData) {
-    const idx = weatherData.hourly.time.findIndex(t => t.startsWith(now.toISOString().slice(0,13)));
-    if (idx >= 3) {
-      pressureChange = weatherData.hourly.surface_pressure[idx] - weatherData.hourly.surface_pressure[idx-3];
-      pressureChange = Math.round(pressureChange * 10) / 10;
-    }
-  }
+  let humidity = null;
 
+  if (isToday && weatherData) {
+    const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const nowStr = jstNow.toISOString().slice(0, 13);
+    const idx = weatherData.hourly.time.findIndex(t => t.startsWith(nowStr));
+    if (idx >= 0) {
+      pressure = Math.round(weatherData.hourly.surface_pressure[idx]);
+      humidity = Math.round(weatherData.hourly.relative_humidity_2m[idx]);
+      if (idx >= 3) {
+        pressureChange = Math.round((weatherData.hourly.surface_pressure[idx] - weatherData.hourly.surface_pressure[idx-3]) * 10) / 10;
+      }
+    }
+    saveFinalRecord(dateKey, now, pressure, pressureChange, humidity);
+  } else {
+    showToast('⏳ 気圧データを取得中...');
+    fetchPastPressure(dateKey).then(({ pressure: p, pressureChange: pc, humidity: h }) => {
+      saveFinalRecord(dateKey, now, p, pc, h);
+    });
+  }
+}
+
+async function fetchPastPressure(dateKey) {
+  try {
+    const s = loadSettings();
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${s.lat}&longitude=${s.lon}&hourly=surface_pressure,relative_humidity_2m&timezone=Asia%2FTokyo&start_date=${dateKey}&end_date=${dateKey}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const pressures = data.hourly.surface_pressure;
+    const humidities = data.hourly.relative_humidity_2m;
+    if (!pressures || pressures.length === 0) return { pressure: null, pressureChange: null, humidity: null };
+    const noonIdx = 12;
+    const pressure = Math.round(pressures[noonIdx] ?? pressures[0]);
+    const pressureChange = noonIdx >= 3
+      ? Math.round((pressures[noonIdx] - pressures[noonIdx - 3]) * 10) / 10
+      : null;
+    const humidity = humidities ? Math.round(humidities[noonIdx] ?? humidities[0]) : null;
+    return { pressure, pressureChange, humidity };
+  } catch(e) {
+    return { pressure: null, pressureChange: null, humidity: null };
+  }
+}
+
+function saveFinalRecord(dateKey, now, pressure, pressureChange, humidity = null) {
   const record = {
     date: dateKey,
     timestamp: now.toISOString(),
@@ -1049,6 +1077,7 @@ function saveRecord() {
     note: document.getElementById('record-note').value,
     pressure,
     pressureChange,
+    humidity,
     meds: [...selectedMeds],
     medEffect,
     weatherCode: weatherData?.current_weather?.weathercode ?? null
@@ -1146,7 +1175,10 @@ function renderLog() {
       .filter(([,v]) => v > 0)
       .map(([k,v]) => `<span class="symptom-tag st-${v}">${symNames[k]}${['','(軽)','(中)','(強)'][v]}</span>`)
       .join('');
-    const pressureText = r.pressure ? `気圧: ${r.pressure} hPa` : '';
+    const pressureText = [
+      r.pressure ? `気圧: ${r.pressure} hPa` : '',
+      r.humidity != null ? `💧${r.humidity}%` : ''
+    ].filter(Boolean).join('　');
     const medText = r.meds && r.meds.length > 0
       ? `<div style="margin-top:5px;font-size:12px;color:var(--text2)">💊 ${r.meds.join('・')} ${ r.medEffect ? ['','→効いた✅','→少し効いた🔶','→効かなかった❌'][r.medEffect] || '' : ''}</div>`
       : '';
@@ -1168,7 +1200,7 @@ function renderLog() {
 }
 
 // ===== 分析 =====
-async function renderAnalysis() {
+function renderAnalysis() {
   const records = DB.get('records', []);
   const cont = document.getElementById('analysis-content');
 
@@ -1186,18 +1218,34 @@ async function renderAnalysis() {
   const currentThreshold = DB.get('threshold', 3);
   const symCounts = { headache:0, dizziness:0, shoulder:0, joint:0, fatigue:0 };
   const pressureOnSym = [];
-  // 閾値分析：症状ありの日の気圧変化を収集
-  const changesWithSym = [];   // 症状あり日の気圧変化量
-  const changesNoSym = [];     // 症状なし日の気圧変化量
+  const changesWithSym = [];
+  const changesNoSym = [];
+  const humidityOnSym = [];
+  const humidityNoSym = [];
   records.forEach(r => {
     let hasSym = false;
     Object.entries(r.symptoms).forEach(([k,v]) => { if(v > 0) { symCounts[k]++; hasSym = true; } });
     if (hasSym && r.pressure) pressureOnSym.push(r.pressure);
-    if (r.pressureChange !== undefined) {
+    if (r.pressureChange != null) {
       if (hasSym) changesWithSym.push(Math.abs(r.pressureChange));
       else changesNoSym.push(Math.abs(r.pressureChange));
     }
+    if (r.humidity != null) {
+      if (hasSym) humidityOnSym.push(r.humidity);
+      else humidityNoSym.push(r.humidity);
+    }
   });
+
+  // 湿度相関分析
+  const avgHumidityOnSym = humidityOnSym.length
+    ? Math.round(humidityOnSym.reduce((a,b)=>a+b,0) / humidityOnSym.length)
+    : null;
+  const avgHumidityNoSym = humidityNoSym.length
+    ? Math.round(humidityNoSym.reduce((a,b)=>a+b,0) / humidityNoSym.length)
+    : null;
+  const humidityCorrelation = avgHumidityOnSym && avgHumidityNoSym
+    ? avgHumidityOnSym - avgHumidityNoSym
+    : null;
 
   // 薬効果集計
   const medEffectMap = {};
@@ -1215,11 +1263,12 @@ async function renderAnalysis() {
   const mostFreq = Object.entries(symCounts).sort((a,b)=>b[1]-a[1])[0];
   const avgPressure = pressureOnSym.length ? Math.round(pressureOnSym.reduce((a,b)=>a+b,0)/pressureOnSym.length) : null;
 
-  // 閾値推奨値を計算
+  // 閾値推奨値を計算（pressureChangeがある記録のみ使用）
   let suggestedThreshold = null;
   let thresholdNote = '';
-  if (changesWithSym.length >= 3) {
-    const avgChange = changesWithSym.reduce((a,b)=>a+b,0) / changesWithSym.length;
+  const validChangesWithSym = changesWithSym.filter(v => v !== null && !isNaN(v));
+  if (validChangesWithSym.length >= 2) {
+    const avgChange = validChangesWithSym.reduce((a,b)=>a+b,0) / validChangesWithSym.length;
     suggestedThreshold = Math.max(1, Math.round(avgChange * 10) / 10);
     if (Math.abs(suggestedThreshold - currentThreshold) >= 1) {
       thresholdNote = suggestedThreshold < currentThreshold
@@ -1236,6 +1285,8 @@ async function renderAnalysis() {
       <div class="pattern-row"><span>記録日数</span><strong>${totalDays}日間</strong></div>
       <div class="pattern-row"><span>最も多い症状</span><strong>${symNames[mostFreq[0]]}（${mostFreq[1]}日）</strong></div>
       ${avgPressure ? `<div class="pattern-row"><span>症状発生時の平均気圧</span><strong>${avgPressure} hPa</strong></div>` : ''}
+      ${avgHumidityOnSym ? `<div class="pattern-row"><span>症状発生時の平均湿度</span><strong>${avgHumidityOnSym}%</strong></div>` : ''}
+      ${humidityCorrelation != null ? `<div class="pattern-row"><span>湿度との関係</span><strong style="color:${humidityCorrelation > 5 ? 'var(--warn)' : humidityCorrelation < -5 ? 'var(--accent)' : 'var(--text2)'}">${humidityCorrelation > 5 ? `高湿度で症状が出やすい（+${humidityCorrelation}%差）` : humidityCorrelation < -5 ? `低湿度で症状が出やすい（${humidityCorrelation}%差）` : '湿度との明確な関係なし'}</strong></div>` : ''}
       <div class="pattern-row"><span>現在の閾値設定</span><strong>${currentThreshold} hPa/3h</strong></div>
       ${suggestedThreshold ? `<div class="pattern-row"><span>推奨閾値</span><strong style="color:var(--accent)">${suggestedThreshold} hPa/3h</strong></div>` : ''}
       ${bestMed ? `<div class="pattern-row"><span>最も効いた対処法</span><strong style="color:var(--ok)">💊 ${bestMed[0]}（${bestMed[1]['効いた']}回効果あり）</strong></div>` : ''}
@@ -1265,55 +1316,71 @@ async function renderAnalysis() {
     </div>
   `;
 
-  // Claude APIでアドバイス
-  try {
-    const summary = `
-記録日数: ${totalDays}日
-最も多い症状: ${symNames[mostFreq[0]]}（${mostFreq[1]}日）
-症状内訳: ${Object.entries(symCounts).map(([k,v])=>`${symNames[k]}${v}日`).join('、')}
-${avgPressure ? `症状発生時の平均気圧: ${avgPressure} hPa` : ''}
-現在の閾値設定: ${currentThreshold} hPa/3h
-${suggestedThreshold ? `推奨閾値: ${suggestedThreshold} hPa/3h` : ''}
-${bestMed ? `最も効果があった対処法: ${bestMed[0]}（効いた${bestMed[1]['効いた']}回）` : ''}
-${Object.keys(medEffectMap).length > 0 ? `対処法の記録: ${Object.entries(medEffectMap).map(([m,d])=>`${m}(効${d['効いた']}回・少${d['少し']}回・否${d['効かない']}回)`).join('、')}` : ''}
-記録から読み取れること: ${records.slice(0,5).map(r=>`${r.date} 気圧${r.pressure??'不明'}hPa 症状${Object.entries(r.symptoms).filter(([,v])=>v>0).map(([k,v])=>symNames[k]+v+'強').join('・')}`).join(' / ')}
-    `.trim();
+  // ローカル分析でアドバイスを生成
+  const faceEl = document.getElementById('analysis-cat-face');
+  const adviceEl = document.getElementById('ai-advice-text');
+  faceEl.textContent = records.filter(r=>Object.values(r.symptoms).some(v=>v>=2)).length > totalDays/2 ? '😿' : '😸';
+  adviceEl.className = '';
+  adviceEl.textContent = generateCatAdvice({
+    totalDays, symCounts, mostFreq, avgPressure, avgHumidityOnSym,
+    humidityCorrelation, currentThreshold, suggestedThreshold, bestMed, medEffectMap
+  });
+}
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: `あなたは「てんきねこ」という天気痛に詳しい猫キャラクターです。
-語尾は必ず「にゃ」「にゃ〜」「にゃ！」のどれかで終わること。
-猫っぽい優しい口調で、以下を含めて3〜5文で伝えてください：
-1. 記録データへの気遣いと全体的なアドバイス
-2. 推奨閾値がある場合は「設定の閾値を◯にするといいにゃ」と具体的に教える
-難しい言葉は使わないこと。絵文字を1〜2個使っても良いです。
+// ===== ローカル猫アドバイス生成 =====
+function generateCatAdvice({ totalDays, symCounts, mostFreq, avgPressure, avgHumidityOnSym, humidityCorrelation, currentThreshold, suggestedThreshold, bestMed, medEffectMap }) {
+  const lines = [];
 
-記録データ：
-${summary}
-
-猫のセリフだけを返してください（前置きや説明は不要）。`
-        }]
-      })
-    });
-    const aiData = await res.json();
-    const advice = aiData.content?.[0]?.text ?? null;
-    const faceEl = document.getElementById('analysis-cat-face');
-    faceEl.textContent = records.filter(r=>Object.values(r.symptoms).some(v=>v>=2)).length > totalDays/2 ? '😿' : '😸';
-    document.getElementById('ai-advice-text').className = '';
-    document.getElementById('ai-advice-text').textContent = advice || `${totalDays}日間の記録、ちゃんと見たにゃ！気圧が変わりやすい日は特に気をつけてほしいにゃ🐾 無理せず休んでにゃ〜。`;
-  } catch(e) {
-    const faceEl = document.getElementById('analysis-cat-face');
-    faceEl.textContent = '🐱';
-    document.getElementById('ai-advice-text').className = '';
-    document.getElementById('ai-advice-text').textContent =
-      `${totalDays}日間の記録、ちゃんと見たにゃ🐾 気圧変化が大きい日は特に気をつけてほしいにゃ。こまめに休んで、水分もとってにゃ〜！`;
+  // ① 記録日数への声かけ
+  if (totalDays < 7) {
+    lines.push(`${totalDays}日間の記録、ありがとうにゃ🐾 まだ始めたばかりにゃけど、続けるほどパターンが見えてくるにゃ！`);
+  } else if (totalDays < 30) {
+    lines.push(`${totalDays}日間もコツコツ記録してくれてありがとうにゃ😸 だいぶデータが集まってきたにゃ！`);
+  } else {
+    lines.push(`${totalDays}日間の記録、すごいにゃ〜！🐾 これだけ続けられたのはえらいにゃ！`);
   }
+
+  // ② 最も多い症状へのアドバイス
+  const symAdvice = {
+    headache: '頭痛が出やすいみたいにゃ。気圧が下がり始めたら早めに薬を飲むといいにゃ。',
+    dizziness: 'めまいが出やすいにゃ。急に立ち上がらないように気をつけてほしいにゃ。',
+    shoulder: '肩こりが多いにゃ〜。気圧が変わる前にストレッチすると楽になるにゃ。',
+    joint: '関節が痛くなりやすいにゃ。雨の前日から気をつけると良いにゃ。',
+    fatigue: 'だるさが出やすいにゃ。無理せず早めに休むのが一番にゃ！'
+  };
+  if (mostFreq[1] > 0) {
+    lines.push(symAdvice[mostFreq[0]] || '体調の変化に敏感なんにゃ。無理しないでにゃ。');
+  }
+
+  // ③ 湿度との関係
+  if (humidityCorrelation != null && Math.abs(humidityCorrelation) > 5) {
+    if (humidityCorrelation > 5) {
+      lines.push(`湿度が高い日（平均${avgHumidityOnSym}%くらい）に症状が出やすいにゃ。じめじめした日は特に注意にゃ！`);
+    } else {
+      lines.push(`乾燥した日に症状が出やすいみたいにゃ。水分補給をこまめにしてほしいにゃ。`);
+    }
+  }
+
+  // ④ 閾値アドバイス
+  if (suggestedThreshold && Math.abs(suggestedThreshold - currentThreshold) >= 1) {
+    if (suggestedThreshold < currentThreshold) {
+      lines.push(`記録を見ると、今の閾値${currentThreshold} hPaより小さな変化でも症状が出てるにゃ。設定の閾値を${suggestedThreshold}に下げてみるといいにゃ！`);
+    } else {
+      lines.push(`記録を見ると、閾値をもう少し上げても大丈夫そうにゃ。設定の閾値を${suggestedThreshold}に変えてみてにゃ。`);
+    }
+  } else if (suggestedThreshold) {
+    lines.push(`今の閾値設定（${currentThreshold} hPa）はあなたにぴったりみたいにゃ😸 このまま続けてにゃ！`);
+  }
+
+  // ⑤ 薬・対処法アドバイス
+  if (bestMed && bestMed[1]['効いた'] > 0) {
+    lines.push(`「${bestMed[0]}」が一番効いてるにゃ！症状が出そうな日は早めに準備しておくといいにゃ🐾`);
+  } else if (Object.keys(medEffectMap).length > 0) {
+    lines.push(`いろんな対処法を試してくれてるにゃ。記録が増えると「これが効く！」がわかってくるにゃ。`);
+  }
+
+  // 最大4文に絞って返す
+  return lines.slice(0, 4).join('\n');
 }
 
 // ===== お医者さん用レポート印刷 =====
@@ -1323,7 +1390,6 @@ function printReport() {
   const city = DB.get('city', '').split('|')[3] ?? '';
   const days = ['日','月','火','水','木','金','土'];
 
-  // 薬効果集計
   const medEffectMap = {};
   records.forEach(r => {
     if (!r.meds || r.meds.length === 0) return;
@@ -1340,60 +1406,75 @@ function printReport() {
   const symCounts = { headache:0, dizziness:0, shoulder:0, joint:0, fatigue:0 };
   records.forEach(r => Object.entries(r.symptoms).forEach(([k,v]) => { if(v>0) symCounts[k]++; }));
 
-  const reportHTML = `
-    <html><head><meta charset="UTF-8">
-    <style>
-      body { font-family: 'Hiragino Sans', sans-serif; font-size: 13px; color: #333; padding: 20px; max-width: 700px; margin: 0 auto; }
-      h1 { font-size: 18px; border-bottom: 2px solid #5b8fbc; padding-bottom: 8px; color: #5b8fbc; }
-      h2 { font-size: 14px; margin-top: 20px; margin-bottom: 6px; color: #3a4a5c; }
-      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-      th { background: #e8eff7; padding: 7px; text-align: left; border: 1px solid #d0dce8; font-size: 12px; }
-      td { padding: 7px; border: 1px solid #d0dce8; font-size: 12px; }
-      .note { font-size: 11px; color: #888; margin-top: 4px; }
-      .footer { margin-top: 30px; font-size: 11px; color: #aaa; border-top: 1px solid #eee; padding-top: 10px; }
-    </style></head><body>
-    <h1>🌡 天気痛・気象病 症状記録レポート</h1>
-    <p>記録期間：${records[records.length-1]?.date} 〜 ${records[0]?.date}（${records.length}日間）　地域：${city}</p>
-    <p class="note">※このレポートは「天気痛ノート」アプリで記録した症状をまとめたものです</p>
+  // アプリ内レポートページを動的に生成して表示
+  let reportPage = document.getElementById('page-report');
+  if (!reportPage) {
+    reportPage = document.createElement('div');
+    reportPage.id = 'page-report';
+    reportPage.className = 'page';
+    document.querySelector('main').appendChild(reportPage);
+  }
 
-    <h2>■ 症状の頻度</h2>
-    <table>
-      <tr><th>症状</th><th>発生日数</th><th>全体の割合</th></tr>
-      ${Object.entries(symCounts).map(([k,v]) =>
-        `<tr><td>${symNames2[k]}</td><td>${v}日</td><td>${Math.round(v/records.length*100)}%</td></tr>`
-      ).join('')}
-    </table>
+  reportPage.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button onclick="closeReport()" style="background:var(--surface2);border:none;border-radius:10px;padding:8px 14px;font-size:13px;cursor:pointer;font-family:inherit">← 戻る</button>
+      <div style="font-size:15px;font-weight:700;color:var(--accent)">お医者さん用レポート</div>
+    </div>
+    <div class="report-preview">
+      <div class="report-header">
+        <div class="report-title">🌡 天気痛・気象病 症状記録レポート</div>
+        <div class="report-sub">記録期間：${records[records.length-1]?.date} 〜 ${records[0]?.date}（${records.length}日間）　地域：${city}</div>
+        <div class="report-sub" style="margin-top:4px">※「天気痛ノート」アプリで記録した症状のまとめです</div>
+      </div>
 
-    ${Object.keys(medEffectMap).length > 0 ? `
-    <h2>■ 薬・対処法の効果</h2>
-    <table>
-      <tr><th>薬・対処法</th><th>使用回数</th><th>効いた</th><th>少し効いた</th><th>効かなかった</th></tr>
-      ${Object.entries(medEffectMap).map(([med, d]) =>
-        `<tr><td>${med}</td><td>${d.合計}回</td><td>${d['効いた']}回</td><td>${d['少し効いた']}回</td><td>${d['効かなかった']}回</td></tr>`
-      ).join('')}
-    </table>` : ''}
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 8px">■ 症状の頻度</div>
+      <table class="report-table">
+        <tr><th>症状</th><th>発生日数</th><th>割合</th></tr>
+        ${Object.entries(symCounts).map(([k,v]) =>
+          `<tr><td>${symNames2[k]}</td><td>${v}日</td><td>${Math.round(v/records.length*100)}%</td></tr>`
+        ).join('')}
+      </table>
 
-    <h2>■ 直近30日の記録詳細</h2>
-    <table>
-      <tr><th>日付</th><th>気圧(hPa)</th><th>気圧変化</th><th>主な症状</th><th>薬・対処</th><th>効果</th><th>メモ</th></tr>
-      ${records.slice(0,30).map(r => {
-        const d = new Date(r.date);
-        const syms = Object.entries(r.symptoms).filter(([,v])=>v>0).map(([k,v])=>symNames2[k]).join('、') || 'なし';
-        const change = r.pressureChange !== null && r.pressureChange !== undefined ? (r.pressureChange >= 0 ? '+' : '') + r.pressureChange : '-';
-        const meds = r.meds && r.meds.length > 0 ? r.meds.join('・') : '-';
-        const effect = r.medEffect ? ['','効いた','少し効いた','効かなかった'][r.medEffect] || '-' : '-';
-        return `<tr><td>${r.date}（${days[d.getDay()]}）</td><td>${r.pressure ?? '-'}</td><td>${change}</td><td>${syms}</td><td>${meds}</td><td>${effect}</td><td>${r.note || ''}</td></tr>`;
-      }).join('')}
-    </table>
+      ${Object.keys(medEffectMap).length > 0 ? `
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 8px">■ 薬・対処法の効果</div>
+      <table class="report-table">
+        <tr><th>薬・対処法</th><th>使用</th><th>効いた</th><th>少し</th><th>効かず</th></tr>
+        ${Object.entries(medEffectMap).map(([med, d]) =>
+          `<tr><td>${med}</td><td>${d.合計}回</td><td>${d['効いた']}回</td><td>${d['少し効いた']}回</td><td>${d['効かなかった']}回</td></tr>`
+        ).join('')}
+      </table>` : ''}
 
-    <div class="footer">天気痛ノート / 出力日：${new Date().toLocaleDateString('ja-JP')}</div>
-    </body></html>
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin:14px 0 8px">■ 直近30日の記録</div>
+      <div style="overflow-x:auto">
+      <table class="report-table" style="min-width:500px">
+        <tr><th>日付</th><th>気圧</th><th>変化</th><th>湿度</th><th>症状</th><th>薬・対処</th><th>効果</th><th>メモ</th></tr>
+        ${records.slice(0,30).map(r => {
+          const d = new Date(r.date + 'T12:00:00+09:00');
+          const syms = Object.entries(r.symptoms).filter(([,v])=>v>0).map(([k,v])=>symNames2[k]).join('、') || 'なし';
+          const change = r.pressureChange != null ? (r.pressureChange >= 0 ? '+' : '') + r.pressureChange : '-';
+          const meds = r.meds?.length > 0 ? r.meds.join('・') : '-';
+          const effect = r.medEffect ? ['','効いた','少し','効かず'][r.medEffect] || '-' : '-';
+          return `<tr><td>${r.date}（${days[d.getDay()]}）</td><td>${r.pressure ?? '-'}</td><td>${change}</td><td>${r.humidity != null ? r.humidity + '%' : '-'}</td><td>${syms}</td><td>${meds}</td><td>${effect}</td><td>${r.note || ''}</td></tr>`;
+        }).join('')}
+      </table>
+      </div>
+
+      <div style="margin-top:20px;font-size:11px;color:#aaa;border-top:1px solid var(--border);padding-top:10px">
+        天気痛ノート / 出力日：${new Date().toLocaleDateString('ja-JP')}
+      </div>
+    </div>
+    <button onclick="window.print()" style="width:100%;padding:14px;background:var(--ok);color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:20px">🖨 印刷・PDFで保存</button>
   `;
 
-  const w = window.open('', '_blank');
-  w.document.write(reportHTML);
-  w.document.close();
-  setTimeout(() => w.print(), 500);
+  // レポートページを表示
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  reportPage.classList.add('active');
+}
+
+function closeReport() {
+  document.getElementById('page-report')?.classList.remove('active');
+  showPage('analysis', document.querySelector('.nav-btn[onclick*="analysis"]'));
 }
 
 
@@ -1401,6 +1482,9 @@ function resetAllData() {
   if (confirm('すべての記録を削除しますか？\nこの操作は元に戻せません。')) {
     DB.set('records', []);
     showToast('🗑 記録を削除しました');
+    // 表示中のページを更新
+    if (document.getElementById('page-log').classList.contains('active')) renderLog();
+    if (document.getElementById('page-analysis').classList.contains('active')) renderAnalysis();
   }
 }
 
